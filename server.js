@@ -1,15 +1,10 @@
 const express = require('express');
 const cors = require('cors');
-const pool = require('./db'); // เรียกใช้ไฟล์เชื่อมต่อฐานข้อมูล
-
 const { Pool } = require('pg');
 
-// 🌟 เปลี่ยนการตั้งค่า Pool ให้ฉลาดขึ้น (รองรับทั้งรันในคอมตัวเอง และรันบน Render)
+// 🌟 สร้าง Pool ให้รองรับทั้ง Render และ Localhost
 const pool = new Pool({
-  // ถ้ามี DATABASE_URL (บน Render) ให้ใช้ค่าจาก Render, แต่ถ้าไม่มี (รันในคอม) ให้ใช้ localhost
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:@localhost:5432/ga_inspect',
-  
-  // Render บังคับให้เปิด SSL เวลาเชื่อมต่อฐานข้อมูลบนคลาวด์
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
@@ -22,12 +17,11 @@ app.use(express.json());
 // 📍 API ROUTES (เส้นทางรับส่งข้อมูล)
 // ==========================================
 
-// 1. API สำหรับดึงข้อมูลอุปกรณ์ทั้งหมด (แปลงจาก Mock Data เป็นดึงจาก Database)
+// 1. API สำหรับดึงข้อมูลอุปกรณ์ทั้งหมด
 app.get('/api/assets', async (req, res) => {
     try {
-        // สั่ง Query ไปที่ PostgreSQL
         const result = await pool.query('SELECT * FROM assets ORDER BY id ASC');
-        res.json(result.rows); // ส่งข้อมูลกลับไปเป็น JSON
+        res.json(result.rows);
     } catch (err) {
         console.error(err.message);
         res.status(500).send('Server Error');
@@ -56,18 +50,10 @@ app.get('/api/inspectors', async (req, res) => {
     }
 });
 
-// ==========================================
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server backend กำลังรันอยู่ที่ http://localhost:${PORT}`);
-});
-
 // 4. API สำหรับเพิ่มอุปกรณ์ใหม่
 app.post('/api/assets', async (req, res) => {
     try {
         const { id, name, location, category, frequency } = req.body;
-        // ใช้ SQL Insert ข้อมูลลงตาราง assets
         const newAsset = await pool.query(
             "INSERT INTO assets (id, name, location, category, frequency, status, last_check) VALUES ($1, $2, $3, $4, $5, 'normal', NULL) RETURNING *",
             [id, name, location, category, frequency]
@@ -81,29 +67,27 @@ app.post('/api/assets', async (req, res) => {
 
 // 5. API สำหรับบันทึกผลการตรวจสอบ (Inspection)
 app.post('/api/inspect', async (req, res) => {
-    const client = await pool.connect(); // ใช้ client เพื่อทำ Transaction
+    const client = await pool.connect(); 
     try {
         const { assetId, status, note, userName } = req.body;
         const logId = `LOG-${Date.now()}`;
 
-        await client.query('BEGIN'); // เริ่มต้น Transaction
+        await client.query('BEGIN'); 
 
-        // 1. อัปเดตตาราง assets (เปลี่ยนสถานะ และวันที่ตรวจล่าสุด)
         await client.query(
             "UPDATE assets SET status = $1, last_check = CURRENT_DATE WHERE id = $2",
             [status, assetId]
         );
 
-        // 2. เพิ่มข้อมูลลงตาราง history_logs
         const newLog = await client.query(
             "INSERT INTO history_logs (id, asset_id, action, status, note, user_name) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
             [logId, assetId, 'ตรวจสอบอุปกรณ์', status, note, userName]
         );
 
-        await client.query('COMMIT'); // บันทึกทุกอย่างลง DB
+        await client.query('COMMIT'); 
         res.json({ success: true, log: newLog.rows[0] });
     } catch (err) {
-        await client.query('ROLLBACK'); // ถ้าพัง ให้ยกเลิกทั้งหมด
+        await client.query('ROLLBACK'); 
         console.error(err.message);
         res.status(500).send('Server Error: ไม่สามารถบันทึกผลการตรวจได้');
     } finally {
@@ -111,6 +95,7 @@ app.post('/api/inspect', async (req, res) => {
     }
 });
 
+// 6. API สำหรับลบอุปกรณ์
 app.delete('/api/assets/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -121,13 +106,12 @@ app.delete('/api/assets/:id', async (req, res) => {
     }
 });
 
-// 6. API สำหรับแก้ไขข้อมูลอุปกรณ์ (Update)
+// 7. API สำหรับแก้ไขข้อมูลอุปกรณ์ (Update)
 app.put('/api/assets/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { name, location, category, frequency } = req.body;
         
-        // ใช้คำสั่ง SQL UPDATE เพื่อแก้ข้อมูลตาม ID
         const updateAsset = await pool.query(
             "UPDATE assets SET name = $1, location = $2, category = $3, frequency = $4 WHERE id = $5 RETURNING *",
             [name, location, category, frequency, id]
@@ -179,4 +163,12 @@ app.put('/api/settings/:key', async (req, res) => {
         await pool.query("UPDATE system_settings SET value = $1 WHERE key = $2", [JSON.stringify(value), key]);
         res.json({ message: "อัปเดตการตั้งค่าสำเร็จ" });
     } catch (err) { res.status(500).send("Server Error"); }
+});
+
+// ==========================================
+// 📍 START SERVER (ย้ายมาไว้ล่างสุดเพื่อความสวยงาม)
+// ==========================================
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server backend กำลังรันอยู่ที่ http://localhost:${PORT}`);
 });
