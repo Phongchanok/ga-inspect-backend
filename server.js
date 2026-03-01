@@ -2,6 +2,17 @@ const express = require('express');
 const cors = require('cors');
 const pool = require('./db'); // เรียกใช้ไฟล์เชื่อมต่อฐานข้อมูล
 
+const { Pool } = require('pg');
+
+// 🌟 เปลี่ยนการตั้งค่า Pool ให้ฉลาดขึ้น (รองรับทั้งรันในคอมตัวเอง และรันบน Render)
+const pool = new Pool({
+  // ถ้ามี DATABASE_URL (บน Render) ให้ใช้ค่าจาก Render, แต่ถ้าไม่มี (รันในคอม) ให้ใช้ localhost
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:@localhost:5432/ga_inspect',
+  
+  // Render บังคับให้เปิด SSL เวลาเชื่อมต่อฐานข้อมูลบนคลาวด์
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
+
 const app = express();
 
 app.use(cors());
