@@ -4,7 +4,11 @@ const { Pool } = require('pg');
 
 // 🌟 สร้าง Pool ให้รองรับทั้ง Render และ Localhost
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:@localhost:5432/ga_inspect',
+  // 🌟 ถ้าอยู่บน Render จะใช้ DATABASE_URL
+  // 🌟 ถ้าอยู่ในเครื่อง Mac จะเอาค่าจาก .env มาประกอบร่างกัน
+  connectionString: process.env.DATABASE_URL || 
+    `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`,
+  
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
