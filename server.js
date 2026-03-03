@@ -1,25 +1,65 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const jwt = require('jsonwebtoken'); // 🌟 สำคัญ
 
 // 🌟 สร้าง Pool ให้รองรับทั้ง Render และ Localhost
 const pool = new Pool({
-  // 🌟 ถ้าอยู่บน Render จะใช้ DATABASE_URL
-  // 🌟 ถ้าอยู่ในเครื่อง Mac จะเอาค่าจาก .env มาประกอบร่างกัน
   connectionString: process.env.DATABASE_URL || 
     `postgresql://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`,
-  
   ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
 // ==========================================
+// 📍 ระบบยืนยันตัวตน (Authentication)
+// ==========================================
+
+// 1. API สำหรับ Login ของ Admin
+app.post('/api/admin/login', (req, res) => {
+    const { username, password } = req.body;
+
+    const validUser = process.env.ADMIN_USER;
+    const validPass = process.env.ADMIN_PASS;
+
+    if (username === validUser && password === validPass) {
+        const token = jwt.sign(
+            { role: 'admin', user: username }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: '8h' }
+        );
+        res.json({ success: true, token: token, message: "เข้าสู่ระบบสำเร็จ" });
+    } else {
+        res.status(401).json({ success: false, message: "Username หรือ Password ไม่ถูกต้อง" });
+    }
+});
+
+// 2. Middleware สำหรับล็อคประตู API (เช็ค Token)
+const verifyAdminToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; 
+
+    if (!token) {
+        return res.status(403).json({ message: "ไม่มีสิทธิ์เข้าถึง: กรุณาแนบ Token" });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(401).json({ message: "ไม่มีสิทธิ์เข้าถึง: Token ไม่ถูกต้องหรือหมดอายุ" });
+        }
+        req.user = user; 
+        next(); 
+    });
+};
+
+// ==========================================
 // 📍 API ROUTES (เส้นทางรับส่งข้อมูล)
 // ==========================================
+
+// --- API แบบเปิด (ไม่ต้องมี Token เพราะ Inspector และหน้า Dashboard ต้องใช้) ---
 
 // 1. API สำหรับดึงข้อมูลอุปกรณ์ทั้งหมด
 app.get('/api/assets', async (req, res) => {
@@ -54,22 +94,7 @@ app.get('/api/inspectors', async (req, res) => {
     }
 });
 
-// 4. API สำหรับเพิ่มอุปกรณ์ใหม่
-app.post('/api/assets', async (req, res) => {
-    try {
-        const { id, name, location, category, frequency } = req.body;
-        const newAsset = await pool.query(
-            "INSERT INTO assets (id, name, location, category, frequency, status, last_check) VALUES ($1, $2, $3, $4, $5, 'normal', NULL) RETURNING *",
-            [id, name, location, category, frequency]
-        );
-        res.json(newAsset.rows[0]);
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send('Server Error: อาจมีรหัสอุปกรณ์ซ้ำในระบบ');
-    }
-});
-
-// 5. API สำหรับบันทึกผลการตรวจสอบ (Inspection)
+// 5. API สำหรับบันทึกผลการตรวจสอบ (Inspection) (เปิดไว้ให้ Inspector ที่มีแค่ PIN ใช้ได้)
 app.post('/api/inspect', async (req, res) => {
     const client = await pool.connect(); 
     try {
@@ -99,8 +124,34 @@ app.post('/api/inspect', async (req, res) => {
     }
 });
 
+// ดึงการตั้งค่าระบบ (เปิดไว้ให้ Inspector ดึง Checklists ไปโชว์ตอนสแกน)
+app.get('/api/settings', async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM system_settings");
+        res.json(result.rows);
+    } catch (err) { res.status(500).send("Server Error"); }
+});
+
+
+// --- 🔒 API แบบปิด (เฉพาะ Admin ที่ต้อง Login และมี Token ถึงจะใช้ได้) ---
+
+// 4. API สำหรับเพิ่มอุปกรณ์ใหม่ 
+app.post('/api/assets', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
+    try {
+        const { id, name, location, category, frequency } = req.body;
+        const newAsset = await pool.query(
+            "INSERT INTO assets (id, name, location, category, frequency, status, last_check) VALUES ($1, $2, $3, $4, $5, 'normal', NULL) RETURNING *",
+            [id, name, location, category, frequency]
+        );
+        res.json(newAsset.rows[0]);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error: อาจมีรหัสอุปกรณ์ซ้ำในระบบ');
+    }
+});
+
 // 6. API สำหรับลบอุปกรณ์
-app.delete('/api/assets/:id', async (req, res) => {
+app.delete('/api/assets/:id', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
     try {
         const { id } = req.params;
         await pool.query("DELETE FROM assets WHERE id = $1", [id]);
@@ -111,7 +162,7 @@ app.delete('/api/assets/:id', async (req, res) => {
 });
 
 // 7. API สำหรับแก้ไขข้อมูลอุปกรณ์ (Update)
-app.put('/api/assets/:id', async (req, res) => {
+app.put('/api/assets/:id', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
     try {
         const { id } = req.params;
         const { name, location, category, frequency } = req.body;
@@ -137,7 +188,7 @@ app.put('/api/assets/:id', async (req, res) => {
 // ==========================================
 
 // 1. จัดการผู้ตรวจสอบ (Inspectors)
-app.post('/api/inspectors', async (req, res) => {
+app.post('/api/inspectors', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
     try {
         const { pin, id, name } = req.body;
         const newInsp = await pool.query("INSERT INTO inspectors (pin, id, name) VALUES ($1, $2, $3) RETURNING *", [pin, id, name]);
@@ -145,7 +196,7 @@ app.post('/api/inspectors', async (req, res) => {
     } catch (err) { res.status(500).send("PIN นี้อาจถูกใช้งานแล้ว"); }
 });
 
-app.delete('/api/inspectors/:pin', async (req, res) => {
+app.delete('/api/inspectors/:pin', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
     try {
         await pool.query("DELETE FROM inspectors WHERE pin = $1", [req.params.pin]);
         res.json({ message: "ลบผู้ตรวจสอบสำเร็จ" });
@@ -153,14 +204,7 @@ app.delete('/api/inspectors/:pin', async (req, res) => {
 });
 
 // 2. จัดการการตั้งค่าระบบ (Categories & Checklists)
-app.get('/api/settings', async (req, res) => {
-    try {
-        const result = await pool.query("SELECT * FROM system_settings");
-        res.json(result.rows);
-    } catch (err) { res.status(500).send("Server Error"); }
-});
-
-app.put('/api/settings/:key', async (req, res) => {
+app.put('/api/settings/:key', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
     try {
         const { key } = req.params;
         const { value } = req.body;
@@ -170,7 +214,7 @@ app.put('/api/settings/:key', async (req, res) => {
 });
 
 // ==========================================
-// 📍 START SERVER (ย้ายมาไว้ล่างสุดเพื่อความสวยงาม)
+// 📍 START SERVER
 // ==========================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
