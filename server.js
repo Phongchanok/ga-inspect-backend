@@ -172,6 +172,7 @@ app.post('/api/assets', verifyAdminToken, async (req, res) => {
         res.status(500).send('Server Error: อาจมีรหัสอุปกรณ์ซ้ำในระบบ');
     }
 });
+
 // 6. API สำหรับลบอุปกรณ์ (ล็อค 2 ชั้น: ต้องมี Token และ ต้องเป็น admin)
 app.delete('/api/assets/:id', verifyAdminToken, async (req, res) => {
     // 🌟 เช็คสิทธิ์: ถ้าไม่ใช่ admin ให้เด้งออกทันที
@@ -190,6 +191,11 @@ app.delete('/api/assets/:id', verifyAdminToken, async (req, res) => {
 
 // 7. API สำหรับแก้ไขข้อมูลอุปกรณ์ (Update)
 app.put('/api/assets/:id', verifyAdminToken, async (req, res) => { // 🔒 เพิ่ม verifyAdminToken
+    // ถ้าเป็น manager ให้เด้งออก เพราะเพิ่ม/แก้ไม่ได้
+    if (req.user.role === 'manager') {
+        return res.status(403).json({ message: "ปฏิเสธการเข้าถึง: คุณมีสิทธิ์เพียงแค่ดูข้อมูลเท่านั้น" });
+    }
+    
     try {
         const { id } = req.params;
         const { name, location, category, frequency } = req.body;
