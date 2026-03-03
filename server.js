@@ -239,6 +239,23 @@ app.put('/api/assets/:id', verifyAdminToken, async (req, res) => {
     }
 });
 
+// 8. API สำหรับดึงประวัติการใช้งานระบบ (Audit Logs)
+app.get('/api/audit-logs', verifyAdminToken, async (req, res) => {
+    // 🌟 ให้สิทธิ์เฉพาะ Admin และ Manager ดูได้ (Staff ดูไม่ได้)
+    if (req.user.role === 'editor') {
+        return res.status(403).json({ message: "ปฏิเสธการเข้าถึง: คุณไม่มีสิทธิ์ดูประวัติการใช้งาน" });
+    }
+
+    try {
+        // ดึงข้อมูล 100 รายการล่าสุด
+        const result = await pool.query('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server Error');
+    }
+});
+
 // ==========================================
 // 📍 API สำหรับหน้าตั้งค่า (Settings & Inspectors)
 // ==========================================
