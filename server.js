@@ -322,65 +322,14 @@ app.post('/api/inspect', async (req, res) => {
     const { assetId, assetName, assetLocation, status, note, userName } = req.body;
 
     try {
-        // 1. (โค้ดบันทึกข้อมูลลง Database เดิมของคุณ ใส่ไว้ตรงนี้)
+        // 1. (โค้ดบันทึกข้อมูลลง Database ของคุณ)
         // await db.query('INSERT INTO history ...');
 
-        // 🌟 2. ถ้าสถานะเป็น 'repair' ให้ Backend ยิงแจ้งเตือนเข้า Telegram
-        if (status === 'repair') {
-            // ดึงกุญแจลับจากระบบของ Render (เพื่อความปลอดภัยสูงสุด)
-            const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-            const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-
-            const message = `🚨 <b>แจ้งเตือน: พบอุปกรณ์ชำรุด!</b>\n\n` +
-                            `<b>รหัส:</b> ${assetId}\n` +
-                            `<b>อุปกรณ์:</b> ${assetName}\n` +
-                            `<b>สถานที่:</b> ${assetLocation}\n` +
-                            `<b>ปัญหาที่พบ:</b> ${note}\n` +
-                            `<b>ผู้ตรวจ:</b> ${userName}\n\n` +
-                            `รบกวนทีมช่างเข้าตรวจสอบด้วยครับ 🛠️`;
-
-            const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-            // สั่ง Backend ให้ยิงข้อความไปที่ Telegram
-            await axios.post(url, {
-                chat_id: TELEGRAM_CHAT_ID,
-                text: message,
-                parse_mode: 'HTML'
-            });
-            console.log("ส่งแจ้งเตือน Telegram สำเร็จ!");
-        }
-
-        res.status(200).json({ message: "บันทึกและแจ้งเตือนสำเร็จ" });
+        // 🌟 ลบโค้ด if (status === 'repair') ที่มี Telegram ออกไปหมดเลยครับ 🌟
+        
+        res.status(200).json({ message: "บันทึกผลการตรวจสอบสำเร็จ" });
     } catch (error) {
         console.error("เกิดข้อผิดพลาด:", error);
         res.status(500).json({ error: "ไม่สามารถบันทึกข้อมูลได้" });
-    }
-});
-
-// 🌟 เส้นทางสำหรับทดสอบ Telegram โดยเฉพาะ (ไม่บันทึกลง Database)
-app.get('/api/test-telegram', async (req, res) => {
-    try {
-        const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-        const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-
-        // ข้อความจำลองสำหรับทดสอบ
-        const message = `🤖 <b>ทดสอบระบบแจ้งเตือน GA Inspect</b>\n\n` +
-                        `สถานะ: การเชื่อมต่อ Telegram ทำงานปกติ 100% ✅\n` +
-                        `เวลา: ${new Date().toLocaleString('th-TH')}`;
-
-        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-        await axios.post(url, {
-            chat_id: TELEGRAM_CHAT_ID,
-            text: message,
-            parse_mode: 'HTML'
-        });
-
-        // แสดงผลบนหน้าเว็บเพื่อให้รู้ว่ายิงสำเร็จ
-        res.send("<h1>🎉 ส่งข้อความทดสอบสำเร็จ!</h1><p>ลองเช็คในกลุ่ม Telegram ของคุณดูครับ</p>");
-        
-    } catch (error) {
-        console.error("Test Telegram Error:", error);
-        res.status(500).send("<h1>❌ เกิดข้อผิดพลาด</h1><p>เช็ค Token หรือ Chat ID อีกครั้งครับ</p>");
     }
 });
