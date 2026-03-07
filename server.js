@@ -232,9 +232,10 @@ app.put('/api/assets/:id', verifyAdminToken, async (req, res) => {
     }
 
     try {
+        // เพิ่มบรรทัดนี้หลังเช็คสิทธิ์ Manager
         const { id } = req.params;
-        const { name, location, category, frequency } = req.body;
-        
+        const { name, location, category, frequency } = req.body; // 🌟 เพิ่มบรรทัดนี้
+
         const updateAsset = await pool.query(
             "UPDATE assets SET name = $1, location = $2, category = $3, frequency = $4 WHERE id = $5 RETURNING *",
             [name, location, category, frequency, id]
@@ -325,18 +326,31 @@ app.put('/api/settings/:key', verifyAdminToken, async (req, res) => {
 // 📍 API สำหรับ Push Notification
 // ==========================================
 
-// ตัวแปรเก็บที่อยู่มือถือของช่างชั่วคราว (ทดสอบ)
-let dummySubscriptions = [];
+// เอาโค้ดส่วนนี้ไปวางต่อจากบรรทัดที่ 330
+app.get('/api/cron/daily-summary', async (req, res) => {
+    try {
+        await sendDailySummary(); // เรียกใช้ฟังก์ชัน
+        res.status(200).send("ส่งแจ้งเตือนงานค้างสำเร็จ");
+    } catch (err) {
+        console.error("Cron Error:", err);
+        res.status(500).send("เกิดข้อผิดพลาดในการส่งแจ้งเตือน");
+    }
+});
 
 // 🌟 Route สำหรับรับข้อมูล Subscription จากมือถือช่าง
-app.post('/api/subscribe', (req, res) => {
+app.post('/api/subscribe', async (req, res) => {
     const subscription = req.body;
-    
-    // เก็บที่อยู่มือถือเข้า Array
-    dummySubscriptions.push(subscription);
-    console.log("มีมือถือเครื่องใหม่กดรับแจ้งเตือนแล้ว!");
-
-    res.status(201).json({ message: "สมัครรับแจ้งเตือนสำเร็จ" });
+    try {
+        // บันทึกลง Database ของจริงที่เราเพิ่งสร้างตารางไป
+        await pool.query(
+            'INSERT INTO push_subscriptions (subscription_data) VALUES ($1)',
+            [JSON.stringify(subscription)]
+        );
+        res.status(201).json({ message: "Success: ข้อมูลแจ้งเตือนถูกเก็บลง Database แล้ว!" });
+    } catch (err) {
+        console.error("Database Error:", err);
+        res.status(500).json({ error: "ไม่สามารถบันทึกข้อมูลลงฐานข้อมูลได้" });
+    }
 });
 
 // 🌟 Route สำหรับทดสอบยิง Push Notification (อัปเดตใหม่ ให้ทนทานต่อ Error)
@@ -351,30 +365,61 @@ app.get('/api/test-push', async (req, res) => {
     let successCount = 0;
     let failCount = 0;
 
-    // วนลูปส่งแจ้งเตือนไปให้มือถือทุกเครื่องที่เก็บไว้
-    for (let i = 0; i < dummySubscriptions.length; i++) {
-        try {
-            await webpush.sendNotification(dummySubscriptions[i], payload);
-            successCount++;
-        } catch (error) {
-            console.error("ยิงแจ้งเตือนพลาด 1 เครื่อง:", error.statusCode || error.message);
-            failCount++;
-            
-            // ถ้า Error 410 (Gone) หรือ 404 (Not Found) แปลว่ารหัสนั้นตายแล้ว ให้ลบทิ้งจาก Array เลย
-            if (error.statusCode === 410 || error.statusCode === 404) {
-                dummySubscriptions.splice(i, 1);
-                i--; // ถอย index กลับ 1 สเต็ปเพราะเราเพิ่งลบของใน array ออกไป
+    try {
+        // 🌟 ดึงข้อมูลจาก Database แทนตัวแปร
+        const subs = await pool.query("SELECT id, subscription_data FROM push_subscriptions");
+        
+        for (let row of subs.rows) {
+            try {
+                await webpush.sendNotification(JSON.parse(row.subscription_data), payload);
+                successCount++;
+            } catch (error) {
+                failCount++;
+                if (error.statusCode === 410 || error.statusCode === 404) {
+                    // ลบออกจาก Database ทันทีถ้ารหัสตาย
+                    await pool.query("DELETE FROM push_subscriptions WHERE id = $1", [row.id]);
+                }
             }
         }
+        res.send(`<h1>ยิงแจ้งเตือนเสร็จสิ้น! (ดึงจาก DB)</h1> <p>สำเร็จ: ${successCount}, ล้มเหลวและลบ: ${failCount}</p>`);
+    } catch (dbErr) {
+        res.status(500).send("Database Error");
     }
-
-    // ส่งสรุปผลกลับไปแสดงบนหน้าเว็บ
-    res.send(`
-        <h1 style="color: green;">🎉 ยิงแจ้งเตือนเสร็จสิ้น!</h1>
-        <p>ส่งสำเร็จ: <b>${successCount}</b> เครื่อง</p>
-        <p>ส่งล้มเหลว (และถูกลบทิ้ง): <b>${failCount}</b> เครื่อง</p>
-    `);
 });
+
+// ฟังก์ชันสำหรับส่งแจ้งเตือนสรุปงานเช้า
+async function sendDailySummary() {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // 🌟 ดึงเฉพาะอุปกรณ์ที่ (ยังไม่เคยตรวจ) หรือ (ครบกำหนด/เลยกำหนดแล้ว)
+    // หมายเหตุ: เช็คตัวพิมพ์เล็ก/ใหญ่ของคำว่า 'normal' ให้ตรงกับตอนที่ Insert ด้วยนะครับ
+    const query = `
+        SELECT COUNT(*) FROM assets 
+        WHERE (last_check IS NULL OR (last_check + (frequency || ' days')::interval) <= $1)
+        AND status != 'normal' 
+    `;
+    
+    try {
+        const result = await pool.query(query, [today]);
+        const count = parseInt(result.rows[0].count);
+
+        if (count > 0) {
+            const payload = JSON.stringify({
+                title: "📋 รายการตรวจเช็คอุปกรณ์วันนี้",
+                body: `วันนี้มีอุปกรณ์ที่ถึงกำหนดตรวจสอบทั้งหมด ${count} รายการครับ`,
+                icon: "/icon-192.png"
+            });
+            
+            const subs = await pool.query("SELECT subscription_data FROM push_subscriptions");
+            subs.rows.forEach(s => {
+                webpush.sendNotification(JSON.parse(s.subscription_data), payload).catch(e => console.error(e));
+            });
+            console.log(`ส่งแจ้งเตือนงานเช้า ${count} รายการ สำเร็จ`);
+        }
+    } catch (err) {
+        console.error("เกิดข้อผิดพลาดในการคำนวณงานเช้า:", err);
+    }
+}
 
 // ==========================================
 // 📍 START SERVER (ต้องอยู่ล่างสุดเสมอ)
