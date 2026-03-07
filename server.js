@@ -313,3 +313,46 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server backend กำลังรันอยู่ที่ http://localhost:${PORT}`);
 });
+
+// อย่าลืม require axios ไว้ด้านบนสุดของไฟล์ (ถ้ายังไม่มี)
+// const axios = require('axios');
+
+app.post('/api/inspect', async (req, res) => {
+    // รับข้อมูลที่ React ส่งมา
+    const { assetId, assetName, assetLocation, status, note, userName } = req.body;
+
+    try {
+        // 1. (โค้ดบันทึกข้อมูลลง Database เดิมของคุณ ใส่ไว้ตรงนี้)
+        // await db.query('INSERT INTO history ...');
+
+        // 🌟 2. ถ้าสถานะเป็น 'repair' ให้ Backend ยิงแจ้งเตือนเข้า Telegram
+        if (status === 'repair') {
+            // ดึงกุญแจลับจากระบบของ Render (เพื่อความปลอดภัยสูงสุด)
+            const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+            const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+            const message = `🚨 <b>แจ้งเตือน: พบอุปกรณ์ชำรุด!</b>\n\n` +
+                            `<b>รหัส:</b> ${assetId}\n` +
+                            `<b>อุปกรณ์:</b> ${assetName}\n` +
+                            `<b>สถานที่:</b> ${assetLocation}\n` +
+                            `<b>ปัญหาที่พบ:</b> ${note}\n` +
+                            `<b>ผู้ตรวจ:</b> ${userName}\n\n` +
+                            `รบกวนทีมช่างเข้าตรวจสอบด้วยครับ 🛠️`;
+
+            const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+            // สั่ง Backend ให้ยิงข้อความไปที่ Telegram
+            await axios.post(url, {
+                chat_id: TELEGRAM_CHAT_ID,
+                text: message,
+                parse_mode: 'HTML'
+            });
+            console.log("ส่งแจ้งเตือน Telegram สำเร็จ!");
+        }
+
+        res.status(200).json({ message: "บันทึกและแจ้งเตือนสำเร็จ" });
+    } catch (error) {
+        console.error("เกิดข้อผิดพลาด:", error);
+        res.status(500).json({ error: "ไม่สามารถบันทึกข้อมูลได้" });
+    }
+});
