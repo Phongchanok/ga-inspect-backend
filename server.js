@@ -1,8 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-app.use(cors({
-  origin: 'https://ga-inspect-systems.onrender.com' // ใส่ URL ของหน้าเว็บคุณที่นี่
-}));
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken'); // 🌟 สำคัญ
 
@@ -43,7 +40,11 @@ const createAuditLog = async (username, action, detail) => {
 };
 
 const app = express();
-app.use(cors());
+app.use(cors({
+    origin: ['https://ga-inspect-systems.onrender.com', 'http://localhost:3000'], // ระบุ URL ทั้งบน Render และตอนเทสต์ในเครื่อง
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // ==========================================
@@ -396,12 +397,22 @@ async function sendDailySummary() {
     
     // 🌟 ดึงเฉพาะอุปกรณ์ที่ (ยังไม่เคยตรวจ) หรือ (ครบกำหนด/เลยกำหนดแล้ว)
     // หมายเหตุ: เช็คตัวพิมพ์เล็ก/ใหญ่ของคำว่า 'normal' ให้ตรงกับตอนที่ Insert ด้วยนะครับ
-    const query = `
-        SELECT COUNT(*) FROM assets 
-        WHERE (last_check IS NULL OR (last_check + (frequency || ' days')::interval) <= $1)
-        AND status != 'normal' 
-    `;
-    
+    // แก้ไขข้างในฟังก์ชัน sendDailySummary
+const query = `
+    SELECT COUNT(*) FROM assets 
+    WHERE (
+        last_check IS NULL OR 
+        (CASE 
+            WHEN frequency = 'Daily' THEN last_check + interval '1 day'
+            WHEN frequency = 'Weekly' THEN last_check + interval '7 days'
+            WHEN frequency = 'Monthly' THEN last_check + interval '1 month'
+            WHEN frequency = 'Quarterly' THEN last_check + interval '3 months'
+            WHEN frequency = 'Yearly' THEN last_check + interval '1 year'
+            ELSE last_check + interval '1 month'
+        END) <= $1
+    )
+    AND status != 'repair' -- กรองเฉพาะเครื่องที่ยังไม่เสียแต่ถึงกำหนดตรวจ
+`;
     try {
         const result = await pool.query(query, [today]);
         const count = parseInt(result.rows[0].count);
