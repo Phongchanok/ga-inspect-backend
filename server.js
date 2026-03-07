@@ -356,3 +356,31 @@ app.post('/api/inspect', async (req, res) => {
         res.status(500).json({ error: "ไม่สามารถบันทึกข้อมูลได้" });
     }
 });
+
+// 🌟 เส้นทางสำหรับทดสอบ Telegram โดยเฉพาะ (ไม่บันทึกลง Database)
+app.get('/api/test-telegram', async (req, res) => {
+    try {
+        const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+        const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+        // ข้อความจำลองสำหรับทดสอบ
+        const message = `🤖 <b>ทดสอบระบบแจ้งเตือน GA Inspect</b>\n\n` +
+                        `สถานะ: การเชื่อมต่อ Telegram ทำงานปกติ 100% ✅\n` +
+                        `เวลา: ${new Date().toLocaleString('th-TH')}`;
+
+        const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+        await axios.post(url, {
+            chat_id: TELEGRAM_CHAT_ID,
+            text: message,
+            parse_mode: 'HTML'
+        });
+
+        // แสดงผลบนหน้าเว็บเพื่อให้รู้ว่ายิงสำเร็จ
+        res.send("<h1>🎉 ส่งข้อความทดสอบสำเร็จ!</h1><p>ลองเช็คในกลุ่ม Telegram ของคุณดูครับ</p>");
+        
+    } catch (error) {
+        console.error("Test Telegram Error:", error);
+        res.status(500).send("<h1>❌ เกิดข้อผิดพลาด</h1><p>เช็ค Token หรือ Chat ID อีกครั้งครับ</p>");
+    }
+});
