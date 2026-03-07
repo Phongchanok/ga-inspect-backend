@@ -1,5 +1,8 @@
 const express = require('express');
 const cors = require('cors');
+app.use(cors({
+  origin: 'https://ga-inspect-systems.onrender.com' // ใส่ URL ของหน้าเว็บคุณที่นี่
+}));
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken'); // 🌟 สำคัญ
 
