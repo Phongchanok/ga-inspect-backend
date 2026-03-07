@@ -344,7 +344,7 @@ app.post('/api/subscribe', async (req, res) => {
         // บันทึกลง Database ของจริงที่เราเพิ่งสร้างตารางไป
         await pool.query(
             'INSERT INTO push_subscriptions (subscription_data) VALUES ($1)',
-            [JSON.stringify(subscription)]
+            [subscription]
         );
         res.status(201).json({ message: "Success: ข้อมูลแจ้งเตือนถูกเก็บลง Database แล้ว!" });
     } catch (err) {
