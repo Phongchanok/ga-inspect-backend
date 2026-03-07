@@ -339,26 +339,41 @@ app.post('/api/subscribe', (req, res) => {
     res.status(201).json({ message: "สมัครรับแจ้งเตือนสำเร็จ" });
 });
 
-// 🌟 Route สำหรับทดสอบยิง Push Notification
+// 🌟 Route สำหรับทดสอบยิง Push Notification (อัปเดตใหม่ ให้ทนทานต่อ Error)
 app.get('/api/test-push', async (req, res) => {
-    // สร้างข้อความแจ้งเตือน
     const payload = JSON.stringify({
         title: "🚨 มีงานแจ้งซ่อมใหม่!",
         body: "กรุณาตรวจสอบหน้า Dashboard",
-        icon: "/icon-192.png", // โลโก้แอปเรา
+        icon: "/icon-192.png",
         badge: "/icon-192.png"
     });
 
-    try {
-        // วนลูปส่งแจ้งเตือนไปให้มือถือทุกเครื่องที่เก็บไว้
-        for (let sub of dummySubscriptions) {
-            await webpush.sendNotification(sub, payload);
+    let successCount = 0;
+    let failCount = 0;
+
+    // วนลูปส่งแจ้งเตือนไปให้มือถือทุกเครื่องที่เก็บไว้
+    for (let i = 0; i < dummySubscriptions.length; i++) {
+        try {
+            await webpush.sendNotification(dummySubscriptions[i], payload);
+            successCount++;
+        } catch (error) {
+            console.error("ยิงแจ้งเตือนพลาด 1 เครื่อง:", error.statusCode || error.message);
+            failCount++;
+            
+            // ถ้า Error 410 (Gone) หรือ 404 (Not Found) แปลว่ารหัสนั้นตายแล้ว ให้ลบทิ้งจาก Array เลย
+            if (error.statusCode === 410 || error.statusCode === 404) {
+                dummySubscriptions.splice(i, 1);
+                i--; // ถอย index กลับ 1 สเต็ปเพราะเราเพิ่งลบของใน array ออกไป
+            }
         }
-        res.send("<h1>🎉 ยิงแจ้งเตือนสำเร็จ!</h1>");
-    } catch (error) {
-        console.error("ยิงแจ้งเตือนพลาด:", error);
-        res.status(500).send("<h1>❌ เกิดข้อผิดพลาด</h1>");
     }
+
+    // ส่งสรุปผลกลับไปแสดงบนหน้าเว็บ
+    res.send(`
+        <h1 style="color: green;">🎉 ยิงแจ้งเตือนเสร็จสิ้น!</h1>
+        <p>ส่งสำเร็จ: <b>${successCount}</b> เครื่อง</p>
+        <p>ส่งล้มเหลว (และถูกลบทิ้ง): <b>${failCount}</b> เครื่อง</p>
+    `);
 });
 
 // ==========================================
