@@ -3,6 +3,21 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken'); // 🌟 สำคัญ
 
+const webpush = require('web-push');
+
+// ตั้งค่า VAPID Keys ให้กับ web-push
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+
+// เช็คว่ามีคีย์ครบไหม ถ้าครบให้เซ็ตค่า
+if (vapidPublicKey && vapidPrivateKey) {
+    webpush.setVapidDetails(
+        process.env.VAPID_SUBJECT || 'mailto:test@example.com',
+        vapidPublicKey,
+        vapidPrivateKey
+    );
+}
+
 // 🌟 สร้าง Pool ให้รองรับทั้ง Render และ Localhost
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 
@@ -307,29 +322,49 @@ app.put('/api/settings/:key', verifyAdminToken, async (req, res) => {
 });
 
 // ==========================================
-// 📍 START SERVER
+// 📍 API สำหรับ Push Notification
+// ==========================================
+
+// ตัวแปรเก็บที่อยู่มือถือของช่างชั่วคราว (ทดสอบ)
+let dummySubscriptions = [];
+
+// 🌟 Route สำหรับรับข้อมูล Subscription จากมือถือช่าง
+app.post('/api/subscribe', (req, res) => {
+    const subscription = req.body;
+    
+    // เก็บที่อยู่มือถือเข้า Array
+    dummySubscriptions.push(subscription);
+    console.log("มีมือถือเครื่องใหม่กดรับแจ้งเตือนแล้ว!");
+
+    res.status(201).json({ message: "สมัครรับแจ้งเตือนสำเร็จ" });
+});
+
+// 🌟 Route สำหรับทดสอบยิง Push Notification
+app.get('/api/test-push', async (req, res) => {
+    // สร้างข้อความแจ้งเตือน
+    const payload = JSON.stringify({
+        title: "🚨 มีงานแจ้งซ่อมใหม่!",
+        body: "กรุณาตรวจสอบหน้า Dashboard",
+        icon: "/icon-192.png", // โลโก้แอปเรา
+        badge: "/icon-192.png"
+    });
+
+    try {
+        // วนลูปส่งแจ้งเตือนไปให้มือถือทุกเครื่องที่เก็บไว้
+        for (let sub of dummySubscriptions) {
+            await webpush.sendNotification(sub, payload);
+        }
+        res.send("<h1>🎉 ยิงแจ้งเตือนสำเร็จ!</h1>");
+    } catch (error) {
+        console.error("ยิงแจ้งเตือนพลาด:", error);
+        res.status(500).send("<h1>❌ เกิดข้อผิดพลาด</h1>");
+    }
+});
+
+// ==========================================
+// 📍 START SERVER (ต้องอยู่ล่างสุดเสมอ)
 // ==========================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Server backend กำลังรันอยู่ที่ http://localhost:${PORT}`);
-});
-
-// อย่าลืม require axios ไว้ด้านบนสุดของไฟล์ (ถ้ายังไม่มี)
-// const axios = require('axios');
-
-app.post('/api/inspect', async (req, res) => {
-    // รับข้อมูลที่ React ส่งมา
-    const { assetId, assetName, assetLocation, status, note, userName } = req.body;
-
-    try {
-        // 1. (โค้ดบันทึกข้อมูลลง Database ของคุณ)
-        // await db.query('INSERT INTO history ...');
-
-        // 🌟 ลบโค้ด if (status === 'repair') ที่มี Telegram ออกไปหมดเลยครับ 🌟
-        
-        res.status(200).json({ message: "บันทึกผลการตรวจสอบสำเร็จ" });
-    } catch (error) {
-        console.error("เกิดข้อผิดพลาด:", error);
-        res.status(500).json({ error: "ไม่สามารถบันทึกข้อมูลได้" });
-    }
 });
